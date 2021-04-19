@@ -7,3 +7,4 @@ Site admins can also:
 - [Configure repository permissions](../../../admin/repo/permissions.md), which Batch Changes will respect.
 - [Disable Batch Changes](../explanations/permissions_in_batch_changes.md#disabling-batch-changes).
 - [Disable Batch Changes for non-site-admin users](../explanations/permissions_in_batch_changes.md#disabling-batch-changes-for-non-site-admin-users).
+- [Configure global credentials](configuring_credentials.md) for pushing and updating changesets.
