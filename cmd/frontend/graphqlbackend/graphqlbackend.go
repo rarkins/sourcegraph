@@ -333,7 +333,7 @@ func prometheusGraphQLRequestName(requestName string) string {
 	return "other"
 }
 
-func NewSchema(db dbutil.DB, batchChanges BatchChangesResolver, codeIntel CodeIntelResolver, insights InsightsResolver, authz AuthzResolver, codeMonitors CodeMonitorsResolver, license LicenseResolver) (*graphql.Schema, error) {
+func NewSchema(db dbutil.DB, batchChanges BatchChangesResolver, codeIntel CodeIntelResolver, insights InsightsResolver, authz AuthzResolver, codeMonitors CodeMonitorsResolver, license LicenseResolver, dotcom DotcomRootResolver) (*graphql.Schema, error) {
 	resolver := newSchemaResolver(db, repoupdater.DefaultClient)
 	schemas := []string{MainSchema}
 
@@ -393,6 +393,18 @@ func NewSchema(db dbutil.DB, batchChanges BatchChangesResolver, codeIntel CodeIn
 		resolver.LicenseResolver = license
 	}
 
+	if dotcom != nil {
+		EnterpriseResolvers.dotcomResolver = dotcom
+		resolver.DotcomRootResolver = dotcom
+		schemas = append(schemas, DotcomSchema)
+		resolver.nodeByIDFns["ProductLicense"] = func(ctx context.Context, id graphql.ID) (Node, error) {
+			return resolver.DotcomRootResolver.ProductLicenseByID(ctx, id)
+		}
+		resolver.nodeByIDFns["ProductSubscription"] = func(ctx context.Context, id graphql.ID) (Node, error) {
+			return resolver.DotcomRootResolver.ProductSubscriptionByID(ctx, id)
+		}
+	}
+
 	return graphql.ParseSchema(
 		strings.Join(schemas, "\n"),
 		resolver,
@@ -411,6 +423,7 @@ type schemaResolver struct {
 	InsightsResolver
 	CodeMonitorsResolver
 	LicenseResolver
+	DotcomRootResolver
 
 	db                dbutil.DB
 	repoupdaterClient *repoupdater.Client
@@ -437,18 +450,6 @@ func newSchemaResolver(db dbutil.DB, repoupdaterClient *repoupdater.Client) *sch
 	r.nodeByIDFns = map[string]NodeByIDFunc{
 		"AccessToken": func(ctx context.Context, id graphql.ID) (Node, error) {
 			return accessTokenByID(ctx, db, id)
-		},
-		"ProductLicense": func(ctx context.Context, id graphql.ID) (Node, error) {
-			if f := ProductLicenseByID; f != nil {
-				return f(ctx, db, id)
-			}
-			return nil, errors.New("not implemented")
-		},
-		"ProductSubscription": func(ctx context.Context, id graphql.ID) (Node, error) {
-			if f := ProductSubscriptionByID; f != nil {
-				return f(ctx, db, id)
-			}
-			return nil, errors.New("not implemented")
 		},
 		"ExternalAccount": func(ctx context.Context, id graphql.ID) (Node, error) {
 			return externalAccountByID(ctx, db, id)
@@ -511,6 +512,7 @@ var EnterpriseResolvers = struct {
 	batchChangesResolver BatchChangesResolver
 	codeMonitorsResolver CodeMonitorsResolver
 	licenseResolver      LicenseResolver
+	dotcomResolver       DotcomRootResolver
 }{
 	codeIntelResolver:    defaultCodeIntelResolver{},
 	authzResolver:        defaultAuthzResolver{},
