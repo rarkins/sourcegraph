@@ -132,36 +132,16 @@ func (fm *FileMatchResolver) ResultCount() int32 {
 }
 
 func (fm *FileMatchResolver) Select(t filter.SelectPath) SearchResultResolver {
-	switch t.Type {
-	case filter.Repository:
-		return fm.Repository()
-	case filter.File:
-		fm.FileMatch.LineMatches = nil
-		fm.FileMatch.Symbols = nil
-		return fm
-	case filter.Symbol:
-		if len(fm.FileMatch.Symbols) > 0 {
-			fm.FileMatch.LineMatches = nil // Only return symbol match if symbols exist
-			if len(t.Fields) > 0 {
-				filteredSymbols := result.SelectSymbolKind(fm.FileMatch.Symbols, t.Fields[0])
-				if len(filteredSymbols) == 0 {
-					return nil // Remove file match if there are no symbol results after filtering
-				}
-				fm.FileMatch.Symbols = filteredSymbols
-			}
-			return fm
-		}
-		return nil
-	case filter.Content:
-		// Only return file match if line matches exist
-		if len(fm.FileMatch.LineMatches) > 0 {
-			fm.FileMatch.Symbols = nil
-			return fm
-		}
-		return nil
-	case filter.Commit:
-		return nil
+	match := fm.FileMatch.Select(t)
+
+	// Turn the result type back to a resolver
+	switch v := match.(type) {
+	case *result.RepoMatch:
+		return NewRepositoryResolver(fm.db, &types.Repo{Name: v.Name, ID: v.ID})
+	case *result.FileMatch:
+		return &FileMatchResolver{db: fm.db, RepoResolver: fm.RepoResolver, FileMatch: *v}
 	}
+
 	return nil
 }
 
@@ -304,24 +284,36 @@ func repoHasFilesWithNamesMatching(ctx context.Context, searcherURLs *endpoint.M
 
 var mockSearchFilesInRepos func(args *search.TextParameters) ([]*FileMatchResolver, *streaming.Stats, error)
 
-func fileMatchResultsToSearchResults(results []*FileMatchResolver) []SearchResultResolver {
-	results2 := make([]SearchResultResolver, len(results))
-	for i, result := range results {
-		results2[i] = result
+func fileMatchesToSearchResults(db dbutil.DB, matches []result.FileMatch) []SearchResultResolver {
+	results := make([]SearchResultResolver, len(matches))
+	for i, match := range matches {
+		results[i] = &FileMatchResolver{
+			FileMatch:    match,
+			RepoResolver: NewRepositoryResolver(db, match.Repo.ToRepo()),
+			db:           db,
+		}
 	}
-	return results2
+	return results
 }
 
-func searchResultsToFileMatchResults(results []SearchResultResolver) ([]*FileMatchResolver, error) {
-	results2 := make([]*FileMatchResolver, len(results))
-	for i, result := range results {
-		fm, ok := result.ToFileMatch()
+func fileMatchResolversToSearchResults(resolvers []*FileMatchResolver) []SearchResultResolver {
+	results := make([]SearchResultResolver, len(resolvers))
+	for i, resolver := range resolvers {
+		results[i] = resolver
+	}
+	return results
+}
+
+func searchResultsToFileMatchResults(resolvers []SearchResultResolver) ([]*FileMatchResolver, error) {
+	results := make([]*FileMatchResolver, len(resolvers))
+	for i, resolver := range resolvers {
+		fm, ok := resolver.ToFileMatch()
 		if !ok {
 			return nil, fmt.Errorf("expected only file match results")
 		}
-		results2[i] = fm
+		results[i] = fm
 	}
-	return results2, nil
+	return results, nil
 }
 
 // searchFilesInRepoBatch is a convenience function around searchFilesInRepos
@@ -342,7 +334,7 @@ func searchFilesInRepos(ctx context.Context, db dbutil.DB, args *search.TextPara
 	if mockSearchFilesInRepos != nil {
 		results, mockStats, err := mockSearchFilesInRepos(args)
 		stream.Send(SearchEvent{
-			Results: fileMatchResultsToSearchResults(results),
+			Results: fileMatchResolversToSearchResults(results),
 			Stats:   statsDeref(mockStats),
 		})
 		return err
@@ -367,6 +359,7 @@ func searchFilesInRepos(ctx context.Context, db dbutil.DB, args *search.TextPara
 	var indexed *indexedSearchRequest
 	if args.Mode == search.ZoektGlobalSearch {
 		indexed = &indexedSearchRequest{
+			db:    db,
 			args:  args,
 			typ:   textRequest,
 			repos: &indexedRepoRevs{},
@@ -494,7 +487,7 @@ func callSearcherOverRepos(
 					// non-diff search reports timeout through err, so pass false for timedOut
 					stats, err := handleRepoSearchResult(repoRev, repoLimitHit, false, err)
 					stream.Send(SearchEvent{
-						Results: fileMatchResultsToSearchResults(matches),
+						Results: fileMatchResolversToSearchResults(matches),
 						Stats:   stats,
 					})
 					return err
