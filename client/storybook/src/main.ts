@@ -19,6 +19,7 @@ const getCSSLoaders = (...loaders: RuleSetUseItem[]): RuleSetUse => [
         loader: 'sass-loader',
         options: {
             sassOptions: {
+                implementation: require('sass'),
                 includePaths: [path.resolve(rootPath, 'node_modules')],
             },
         },
@@ -133,8 +134,8 @@ const config = {
                 loader: 'css-loader',
                 options: {
                     sourceMap: isDevelopment,
-                    localsConvention: 'camelCase',
                     modules: {
+                        exportLocalsConvention: 'camelCase',
                         localIdentName: '[name]__[local]_[hash:base64:5]',
                     },
                 },

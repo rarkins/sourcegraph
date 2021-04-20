@@ -202,8 +202,8 @@ const config = {
           loader: 'css-loader',
           options: {
             sourceMap: isDevelopment,
-            localsConvention: 'camelCase',
             modules: {
+              exportLocalsConvention: 'camelCase',
               localIdentName: '[name]__[local]_[hash:base64:5]',
             },
           },
